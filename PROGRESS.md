@@ -4,7 +4,7 @@
 > session knows exact status without re-reading everything.
 > Full spec: `chicken-shop-app-spec.md` · Project rules: `CLAUDE.md`
 
-_Last updated: 2026-07-01 (Session A complete)_
+_Last updated: 2026-07-01 (Session B complete)_
 
 ---
 
@@ -39,9 +39,34 @@ _Last updated: 2026-07-01 (Session A complete)_
     store `item_name` + `unit_price_snapshot` frozen at bill time.
   - **`cash_summary`** is a recomputable aggregate cache; the ledgers remain source of truth.
 
+- **Session B — Quick Billing + Menu/Price** ✅
+  - **Test infra:** `jest-expo` set up (+ `@react-native/jest-preset`, `babel-preset-expo`, `.npmrc`
+    `legacy-peer-deps=true`). `npm test` → **19 tests green**. This is now the regression bar.
+  - **Pure financial core** (`src/services/billing/calc.ts`, fully unit-tested): `computeLineTotal`
+    (qty = round(qty×unitPrice), amount = as-is), `computeBillTotal`, split sum/validation,
+    `requiresPhone` (udhar>0), `udharBalance` (signed sum). No DB → trivially testable.
+  - **Services** (DB orchestration, WatermelonDB `write()` transactions):
+    - `menu/menuService.ts` + `menu/seed.ts` — CRUD, soft active-toggle, idempotent `seedMenuIfEmpty()`
+      with a **placeholder** chicken-shop menu (real prices still TBD; shopkeeper edits in-app).
+    - `customer/customerService.ts` — create/update, phone normalisation.
+    - `billing/billService.ts` — `createDraftBill` → `setDraftLines`/`addLineToDraft` → `confirmBill`
+      (validates, locks, writes `payment_splits`, appends udhar **debit** if credit>0; atomic — bad
+      validation aborts the txn) → `voidBill` (append **`void_reversal`** to cancel the debit, never
+      mutate/delete) → `recreateBill`/`voidAndRecreate` (fresh draft, copies frozen snapshots,
+      sets `replaces_bill_id`).
+  - **New enum value `void_reversal`** + `UDHAR_SIGN` map in `constants.ts` (value-only, no migration).
+  - **UI** (React Navigation native-stack): `HomeScreen` (hub + seeds menu on launch), `MenuScreen`
+    (list + add/edit price + active toggle), `BillingScreen` (menu-chip picker → local cart for
+    copy-pen speed → per-line qty/amount + price override → cash/online/udhar splits → phone-required
+    guard → confirm persists+locks), `BillsScreen` (reactive list + status badges), `BillDetailScreen`
+    (items/splits + Void & Recreate / Void only). Reactive via `hooks/useObservedQuery.ts`.
+  - **Verify:** `tsc --noEmit` clean · `jest` **19/19** · `expo-doctor` **20/20**.
+  - **Note:** billing UI builds the cart in local React state (speed), persisting only on confirm; the
+    service layer still fully supports incremental *persisted* drafts (used by void+recreate).
+
 ## ⏳ Pending (MVP Layer 1 — planned session breakdown)
 - [x] **Session A** — Expo scaffold + WatermelonDB schema + data model (foundation, solo) ✅
-- [ ] **Session B** — Quick Billing + Menu/Price (draft→confirm→void, frozen price snapshot)
+- [x] **Session B** — Quick Billing + Menu/Price (draft→confirm→void, frozen price snapshot) ✅
 - [ ] **Session C** — Udhar ledger + Payments (append-only, aging flags 15/60 days)
 - [ ] **Session D** — WhatsApp/SMS share + retry queue (native intents, pending/sent status)
 - [ ] **Session E** — Daily Summary + Raw Material + Wastage tracking
@@ -49,21 +74,28 @@ _Last updated: 2026-07-01 (Session A complete)_
 - [ ] **Session G** — Supabase background sync/backup (offline-first catch-up, strict review)
 
 ## ➡️ Next step
-**Session B: Quick Billing + Menu/Price management.**
-Model: Opus (financial logic). Start in Plan Mode. Build order: menu-item CRUD + seed real menu →
-bill draft (multi-line, per-item qty/amount mode) → confirm (lock + freeze snapshots + write payment_splits +
-udhar debit entry) → void+recreate. Enforce: phone mandatory once any udhar split > 0. All money in paise.
+**Session C: Udhar ledger + Payments.**
+Model: Opus (financial logic). Build: customer udhar statement screen (append-only history + running
+balance via `udharBalance`), record **partial payments** (append `payment` entry, independent of bills),
+aging flags (15+ yellow / 60+ red from oldest unsettled debit), bad-debt **write-off** (append `writeoff`,
+counts as loss). The ledger + calc (`udharBalance`, signed entries) already exist from Session B — Session C
+is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp statement is Session D.
 
-## ⚠️ Resume gotchas (Session A → B)
+## ⚠️ Resume gotchas (carry-over + new)
 - **WatermelonDB needs a DEV BUILD, not Expo Go.** JSI native module isn't in Expo Go. To actually run the DB:
-  `npx expo prebuild` then `npx expo run:android` (local), or `eas build --profile development`. `expo start` alone
-  (Expo Go) will crash on DB init. `tsc`/`expo config`/`expo-doctor` all pass without a build — that's the CI bar for now.
-- **Babel decorators pinned to `^7`** (Expo is on Babel 7; the `@8` plugin errors on peer `@babel/core@8`). Don't bump.
+  `npx expo prebuild` then `npx expo run:android` (local), or `eas build --profile development`. `expo start`
+  alone (Expo Go) will crash on DB init. **CI bar = `tsc` + `jest` + `expo-doctor`** (all pass without a build);
+  the UI/DB flows have NOT been run on a device yet — first real run should smoke-test billing end-to-end.
+- **`.npmrc` has `legacy-peer-deps=true`** — required for RN/Expo transitive peer ranges (jest-preset 0.85 vs
+  rn 0.86). Keep it; `npm install` depends on it.
+- **Babel decorators pinned to `^7`** (Expo is on Babel 7). Don't bump.
 - **App id `com.chickenshop.app`** is a placeholder — change before any store submission.
-- **No seed data yet** — menu items table is empty. Session B seeds real menu + pricing (still to be captured from shop).
+- **Menu prices are PLACEHOLDERS** (`services/menu/seed.ts`) — real menu + pricing still to be captured from
+  the shop, then either edit in-app or update the seed.
+- **Billing UI creates a fresh customer per bill when a name/udhar is present** (no dedup yet) — customer
+  matching/dedup is a later concern (spec §4.3 / Session F). Fine for now.
 - No Supabase config yet (deferred to Session G); offline-first local DB is fully standalone until then.
 
 ## 📌 Open questions / notes
 - Security hook activates only after Claude Code **restart** (hooks load at session start).
-- Shop visit done — spec validated against real operations. Confirmed menu items + pricing to be captured in config during Session B (seed data).
-- `EAS`/`eas.json` not created yet — will add when first dev build is needed (Session B/C).
+- `EAS`/`eas.json` not created yet — will add when first dev build is needed (likely to smoke-test Session B/C).

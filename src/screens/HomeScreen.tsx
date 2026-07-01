@@ -1,70 +1,59 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { database } from '../db';
-import { TableName } from '../db/constants';
+import type { RootStackParamList } from '../navigation/RootNavigator';
+import { seedMenuIfEmpty } from '../services/menu/seed';
 import { formatIst } from '../services/time';
 
-/**
- * Minimal foundation screen — verifies the WatermelonDB wiring is live by counting
- * rows in each table. Real billing/udhar screens replace this from Session B onward.
- */
-export default function HomeScreen() {
-  const [counts, setCounts] = useState<Record<string, number> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+
+const TILES: { label: string; screen: keyof RootStackParamList; hint: string }[] = [
+  { label: '🧾  New Bill', screen: 'Billing', hint: 'Quick billing — cash / online / udhar' },
+  { label: '📋  Bills', screen: 'Bills', hint: 'Recent bills · void + recreate' },
+  { label: '🍗  Menu & Prices', screen: 'Menu', hint: 'Edit items and default prices' },
+];
+
+export default function HomeScreen({ navigation }: Props) {
+  const [seedNote, setSeedNote] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const names = Object.values(TableName);
-        const results = await Promise.all(
-          names.map((t) => database.get(t).query().fetchCount()),
-        );
-        if (mounted) {
-          setCounts(Object.fromEntries(names.map((n, i) => [n, results[i]])));
-        }
-      } catch (e) {
-        if (mounted) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    seedMenuIfEmpty()
+      .then((seeded) => seeded && setSeedNote('Default menu loaded — edit prices in Menu.'))
+      .catch((e) => setSeedNote(`Menu seed failed: ${e instanceof Error ? e.message : e}`));
   }, []);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🐔 Chicken Shop</Text>
-      <Text style={styles.subtitle}>Offline-first · WatermelonDB ready</Text>
       <Text style={styles.time}>{formatIst(Date.now())} IST</Text>
 
-      {error ? (
-        <Text style={styles.error}>DB error: {error}</Text>
-      ) : counts ? (
-        <View style={styles.table}>
-          {Object.entries(counts).map(([name, n]) => (
-            <Text key={name} style={styles.row}>
-              {name}: {n}
-            </Text>
-          ))}
-        </View>
-      ) : (
-        <Text style={styles.subtitle}>Connecting to local database…</Text>
-      )}
+      <View style={styles.tiles}>
+        {TILES.map((t) => (
+          <Pressable
+            key={t.screen}
+            style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
+            onPress={() => navigation.navigate(t.screen as 'Billing')}
+          >
+            <Text style={styles.tileLabel}>{t.label}</Text>
+            <Text style={styles.tileHint}>{t.hint}</Text>
+          </Pressable>
+        ))}
+      </View>
 
-      <StatusBar style="auto" />
+      {seedNote ? <Text style={styles.note}>{seedNote}</Text> : null}
+      <StatusBar style="light" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  title: { fontSize: 28, fontWeight: '700', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#666', marginBottom: 8 },
-  time: { fontSize: 12, color: '#999', marginBottom: 20 },
-  table: { alignSelf: 'stretch', gap: 4 },
-  row: { fontSize: 14, color: '#333', fontVariant: ['tabular-nums'] },
-  error: { color: '#c0392b', textAlign: 'center' },
+  container: { flex: 1, backgroundColor: '#fff', padding: 20 },
+  time: { fontSize: 12, color: '#999', marginBottom: 16, textAlign: 'right' },
+  tiles: { gap: 14 },
+  tile: { backgroundColor: '#fff3ef', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: '#f0d2c8' },
+  tilePressed: { opacity: 0.6 },
+  tileLabel: { fontSize: 20, fontWeight: '700', color: '#b8320f' },
+  tileHint: { fontSize: 13, color: '#8a6a60', marginTop: 4 },
+  note: { marginTop: 20, fontSize: 12, color: '#2e7d32', textAlign: 'center' },
 });
