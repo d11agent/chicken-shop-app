@@ -1,0 +1,36 @@
+{
+  "name": "chicken-shop-app",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@morrowdigital/watermelondb-expo-plugin": "^2.3.3",
+    "@nozbe/simdjson": "^3.9.4",
+    "@nozbe/watermelondb": "^0.28.0",
+    "expo": "~57.0.1",
+    "expo-build-properties": "~57.0.2",
+    "expo-status-bar": "~57.0.0",
+    "react": "19.2.3",
+    "react-native": "0.86.0"
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-decorators": "^7.29.7",
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true,
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": ["@nozbe/watermelondb", "@nozbe/simdjson"],
+        "listUnknownPackages": false
+      }
+    }
+  }
+}
