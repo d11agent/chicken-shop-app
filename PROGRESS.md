@@ -9,6 +9,7 @@ _Last updated: 2026-07-01_
 ---
 
 ## ✅ Done
+- **Shop visit complete** — feature list validated against real operations; spec is confirmed (not speculative).
 - **Project config + security bootstrap**
   - `CLAUDE.md` — project context, non-negotiable domain rules, PRIME workflow, security posture
   - `.claude/hooks/security-guard.js` — Layer 1 input filter (Bash/PowerShell code-exec gating, tested: 4 block + 4 allow inc. false-positives)
@@ -24,7 +25,6 @@ _Last updated: 2026-07-01_
 - [ ] **Session E** — Daily Summary + Raw Material + Wastage tracking
 - [ ] **Session F** — Customer Insights (self-learning gaps, loyal-customer income)
 - [ ] **Session G** — Supabase background sync/backup (offline-first catch-up, strict review)
-- [ ] Shop visit — validate feature list + confirm real menu/pricing (spec Next Steps)
 
 ## ➡️ Next step
 **Session A: Expo scaffold + WatermelonDB schema + data model.**
@@ -32,4 +32,4 @@ Model: Opus (multi-file foundation). Start in Plan Mode.
 
 ## 📌 Open questions / notes
 - Security hook activates only after Claude Code **restart** (hooks load at session start).
-- Real menu items + pricing still need shopkeeper confirmation before UI finalizes.
+- Shop visit done — spec validated against real operations. Confirmed menu items + pricing to be captured in config during Session A/B (seed data).
