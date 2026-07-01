@@ -73,6 +73,30 @@ _Last updated: 2026-07-01 (Session B complete)_
 - [ ] **Session F** — Customer Insights (self-learning gaps, loyal-customer income)
 - [ ] **Session G** — Supabase background sync/backup (offline-first catch-up, strict review)
 
+## 🔧 Dev build + smoke test (set up — needs Banti to run interactive steps)
+Local Android toolchain is **absent on this machine** (no Java/SDK/emulator), so `expo run:android`
+won't work here. Path = **EAS cloud build** (`eas-cli` 20.3.0 is installed).
+- Added: `eas.json` (development/preview/production profiles), `expo-dev-client`, `expo-system-ui`.
+- **Validated locally:** `expo prebuild --platform android` succeeds and the WatermelonDB config plugin
+  wires JSI natively (`:watermelondb-jsi` gradle module + `WatermelonDBJSIPackage` in MainApplication +
+  proguard keep-rule). The generated `android/` was then removed — we stay managed/CNG; **EAS regenerates
+  it at build time**. (`/android` + `/ios` are gitignored.)
+
+**Banti — run these to get it on a phone (one-time):**
+```
+eas login                                             # Expo account (free; sign up at expo.dev)
+eas init                                              # links project, writes projectId into app.json
+eas build --profile development --platform android    # cloud build -> install URL + QR for the APK
+# install the dev-client APK on an Android phone, then:
+npx expo start --dev-client                           # scan QR from the dev client -> app loads (DB works)
+```
+Prefer a no-dev-server click-test? `eas build --profile preview --platform android` gives a standalone APK.
+
+**Smoke-test checklist (billing golden path):** launch → default menu seeds → Menu: edit a price →
+New Bill: add a qty line (kg×₹) + an amount line (₹) → split cash/online/udhar → confirm with udhar but
+**no phone** (should block) → add phone → confirm → Bills list shows it → open → Void & Recreate → edit →
+confirm again (new bill should reference the voided one).
+
 ## ➡️ Next step
 **Session C: Udhar ledger + Payments.**
 Model: Opus (financial logic). Build: customer udhar statement screen (append-only history + running
