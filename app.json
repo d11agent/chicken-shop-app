@@ -33,7 +33,8 @@
           }
         }
       ],
-      "./plugins/withKotlinVersion"
+      "./plugins/withKotlinVersion",
+      "./plugins/withWatermelonNewArch"
     ],
     "extra": {
       "eas": {
