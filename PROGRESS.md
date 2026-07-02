@@ -112,6 +112,18 @@ is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp stat
   `ext.kotlinVersion` into root build.gradle). Reason: SDK 57's `expo-root-project` reads Kotlin from the
   version catalog / `ext`, NOT from the `android.kotlinVersion` gradle property that expo-build-properties
   writes — and its KSPLookup only supports >= 2.1.20. Don't rely on gradle.properties for the Kotlin version.
+  **This fix DID work** — EAS logs show `kotlin: 2.1.20 / ksp: 2.1.20-2.0.1`. The repeated "Kotlin 1.9.24"
+  message was a red herring; once resolved, the *real* failure surfaced (see next).
+- **WatermelonDB JSI is wired for New Arch via `plugins/withWatermelonNewArch.js`.** `@morrowdigital/
+  watermelondb-expo-plugin` patches MainApplication for the OLD architecture — it injects
+  `import com.facebook.react.bridge.JSIModulePackage` + a `getJSIModulePackage()` override. RN 0.86 / SDK 57
+  is always bridgeless New Arch: that class is gone and the new `reactHost by lazy` MainApplication has no
+  such hook, so only the broken import survived → `:app:compileDebugKotlin` failed with
+  `Unresolved reference 'JSIModulePackage'`. Our plugin (runs AFTER the watermelondb plugin) strips the bad
+  import/override and registers `WatermelonDBJSIPackage()` (a plain `ReactPackage`) in the autolinked
+  `PackageList` block — the correct New-Arch wiring. **How the real error was found:** EAS logs are
+  brotli-compressed NDJSON (`{"msg":...}` per line); `curl` the signed `logFiles` URL from
+  `eas build:view <id> --json`, then `brotli -d`, then grep for `FAILURE:` / `e:` / `Task .* FAILED`.
 - **EAS caches the prebuild output.** After changing native config (kotlin, plugins, app.json android/ios),
   rebuild with **`eas build --clear-cache`** or the stale cached gradle is reused.
 - **WatermelonDB needs a DEV BUILD, not Expo Go.** JSI native module isn't in Expo Go. To actually run the DB:
