@@ -108,6 +108,12 @@ is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp stat
 ## ⚠️ Resume gotchas (carry-over + new)
 - **ALWAYS `git push origin main` after committing — do NOT ask Banti** (see CLAUDE.md Workflow). EAS builds
   from GitHub, so an unpushed commit = stale cloud build (this already caused a repeat Kotlin build failure).
+- **Kotlin version is pinned to 2.1.20 via `plugins/withKotlinVersion.js`** (config plugin injecting
+  `ext.kotlinVersion` into root build.gradle). Reason: SDK 57's `expo-root-project` reads Kotlin from the
+  version catalog / `ext`, NOT from the `android.kotlinVersion` gradle property that expo-build-properties
+  writes — and its KSPLookup only supports >= 2.1.20. Don't rely on gradle.properties for the Kotlin version.
+- **EAS caches the prebuild output.** After changing native config (kotlin, plugins, app.json android/ios),
+  rebuild with **`eas build --clear-cache`** or the stale cached gradle is reused.
 - **WatermelonDB needs a DEV BUILD, not Expo Go.** JSI native module isn't in Expo Go. To actually run the DB:
   `npx expo prebuild` then `npx expo run:android` (local), or `eas build --profile development`. `expo start`
   alone (Expo Go) will crash on DB init. **CI bar = `tsc` + `jest` + `expo-doctor`** (all pass without a build);
