@@ -44,6 +44,10 @@ gas cylinder tracking, retroactive customer-record merge.
 - Plan Mode first on new/external code. `/execute` = PLAN → BUILD → VERIFY → SECURITY → EVOLVE.
 - Surgical changes only — no existing flow breaks. **Regression rule: tests green before starting new work.**
 - **Model:** Opus for backend/sync/multi-file/financial logic; Sonnet for simple single-file UI.
+- **Auto-push rule (do NOT ask):** at every session end / after committing, `git push origin main`
+  automatically. Don't wait for Banti to ask. Reason: **EAS builds from GitHub** — unpushed commits mean
+  the cloud build uses stale source (this already caused a repeat Kotlin-version build failure). Commit is
+  not "done" until it's pushed.
 
 ## Security posture (this repo)
 - Layer 1 input filter active: `.claude/hooks/security-guard.js` (PreToolUse, matcher `Bash|Write|Edit|Create|PowerShell`). Code-exec patterns gate only Bash/PowerShell; file-writing tools pass through.
@@ -53,4 +57,5 @@ gas cylinder tracking, retroactive customer-record merge.
 - **Messaging rule:** WhatsApp/SMS must never carry raw PIN/password/full financial dumps beyond the customer's own udhar statement.
 
 ## Current state
-Fresh repo — spec + this config only. No app code yet. Next: Expo scaffold + WatermelonDB schema.
+Sessions A + B done (Expo scaffold + WatermelonDB schema; Quick Billing + Menu/Price). EAS dev-build
+config in place. See `PROGRESS.md` for the live status, resume point, and dev-build handoff.

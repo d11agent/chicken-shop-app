@@ -106,6 +106,8 @@ counts as loss). The ledger + calc (`udharBalance`, signed entries) already exis
 is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp statement is Session D.
 
 ## ⚠️ Resume gotchas (carry-over + new)
+- **ALWAYS `git push origin main` after committing — do NOT ask Banti** (see CLAUDE.md Workflow). EAS builds
+  from GitHub, so an unpushed commit = stale cloud build (this already caused a repeat Kotlin build failure).
 - **WatermelonDB needs a DEV BUILD, not Expo Go.** JSI native module isn't in Expo Go. To actually run the DB:
   `npx expo prebuild` then `npx expo run:android` (local), or `eas build --profile development`. `expo start`
   alone (Expo Go) will crash on DB init. **CI bar = `tsc` + `jest` + `expo-doctor`** (all pass without a build);
