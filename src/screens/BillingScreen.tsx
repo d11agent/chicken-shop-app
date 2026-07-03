@@ -12,9 +12,16 @@ import {
   setDraftCustomer,
   confirmBill,
 } from '../services/billing/billService';
-import { computeLineTotal, validateBill, type SplitInput } from '../services/billing/calc';
+import {
+  computeLineTotal,
+  validateBill,
+  sumSplits,
+  udharPortion,
+  ROUNDING_TOLERANCE_PAISE,
+  type SplitInput,
+} from '../services/billing/calc';
 import type { DraftLineInput } from '../services/billing/types';
-import { createCustomer, getCustomer } from '../services/customer/customerService';
+import { findOrCreateCustomer, getCustomer } from '../services/customer/customerService';
 import { UnitType, PaymentMode } from '../db/constants';
 import { formatPaise, rupeesToPaise, paiseToRupees } from '../services/currency';
 import type { MenuItem } from '../db/models';
@@ -31,17 +38,15 @@ interface CartLine {
   amountStr: string; // ₹
 }
 
+const MODE_LABELS: Record<PaymentMode, string> = {
+  [PaymentMode.cash]: 'Cash',
+  [PaymentMode.online]: 'Online',
+  [PaymentMode.udhar]: 'Udhar',
+};
+const PAYMENT_MODES = [PaymentMode.cash, PaymentMode.online, PaymentMode.udhar] as const;
+
 let keySeq = 0;
 const nextKey = () => `line-${keySeq++}`;
-
-/** Live line total in paise; returns 0 for incomplete input (never throws in render). */
-function lineTotalSafe(line: CartLine): number {
-  try {
-    return computeLineTotal(toDraftLine(line));
-  } catch {
-    return 0;
-  }
-}
 
 function toDraftLine(line: CartLine): DraftLineInput {
   if (line.mode === UnitType.qty) {
@@ -61,12 +66,32 @@ function toDraftLine(line: CartLine): DraftLineInput {
   };
 }
 
+/** Live line total in paise; returns 0 for incomplete input (never NaN, never throws in render). */
+function lineTotalSafe(line: CartLine): number {
+  try {
+    return computeLineTotal(toDraftLine(line));
+  } catch {
+    return 0;
+  }
+}
+
+/** A line only counts as a real, savable item once it has a positive, complete value. */
+function isLineComplete(line: CartLine): boolean {
+  try {
+    return computeLineTotal(toDraftLine(line)) > 0;
+  } catch {
+    return false;
+  }
+}
+
 export default function BillingScreen({ route, navigation }: Props) {
   const menuItems = useObservedQuery<MenuItem>(() => observeMenuItems(true), []);
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
+  const [splitPayment, setSplitPayment] = useState(false);
   const [cash, setCash] = useState('');
   const [online, setOnline] = useState('');
   const [udhar, setUdhar] = useState('');
@@ -105,32 +130,62 @@ export default function BillingScreen({ route, navigation }: Props) {
   }, [draftBillId]);
 
   const billTotal = useMemo(() => cart.reduce((sum, l) => sum + lineTotalSafe(l), 0), [cart]);
+  const cartHasItems = cart.length > 0;
+  const cartLinesValid = cartHasItems && cart.every(isLineComplete);
 
   const paise = (s: string) => (s.trim() === '' ? 0 : rupeesToPaise(parseFloat(s)) || 0);
-  const splits: SplitInput[] = useMemo(
-    () => [
-      { mode: PaymentMode.cash, amount: paise(cash) },
-      { mode: PaymentMode.online, amount: paise(online) },
-      { mode: PaymentMode.udhar, amount: paise(udhar) },
-    ],
-    [cash, online, udhar],
-  );
-  const paidTotal = splits.reduce((s, x) => s + x.amount, 0);
-  const udharAmount = paise(udhar);
+
+  const splits: SplitInput[] = useMemo(() => {
+    if (splitPayment) {
+      return [
+        { mode: PaymentMode.cash, amount: paise(cash) },
+        { mode: PaymentMode.online, amount: paise(online) },
+        { mode: PaymentMode.udhar, amount: paise(udhar) },
+      ];
+    }
+    return paymentMode ? [{ mode: paymentMode, amount: billTotal }] : [];
+  }, [splitPayment, cash, online, udhar, paymentMode, billTotal]);
+
+  const paidTotal = sumSplits(splits);
+  const needsPhone = udharPortion(splits) > 0;
+  const paymentMismatch = Math.abs(paidTotal - billTotal) > ROUNDING_TOLERANCE_PAISE;
+
+  const canConfirm =
+    cartLinesValid &&
+    billTotal > 0 &&
+    splits.length > 0 &&
+    !paymentMismatch &&
+    (!needsPhone || customerPhone.trim().length > 0) &&
+    !saving;
 
   const addFromMenu = (item: MenuItem) => {
-    setCart((prev) => [
-      ...prev,
-      {
-        key: nextKey(),
-        menuItemId: item.id,
-        itemName: item.name,
-        mode: item.unitType,
-        quantityStr: item.unitType === UnitType.qty ? '1' : '',
-        unitPriceStr: String(paiseToRupees(item.defaultPrice)),
-        amountStr: '',
-      },
-    ]);
+    setCart((prev) => {
+      const idx = prev.findIndex((l) => l.menuItemId === item.id);
+      if (idx >= 0) {
+        const existing = prev[idx];
+        if (existing.mode === UnitType.qty) {
+          // Same item tapped again: merge into one line (increment qty) instead of duplicating.
+          const currentQty = parseFloat(existing.quantityStr) || 0;
+          const merged = { ...existing, quantityStr: String(currentQty + 1) };
+          return prev.map((l, i) => (i === idx ? merged : l));
+        }
+        // Amount-mode items (Masala/Extra, Packing) have no natural qty to bump —
+        // keep the single existing line rather than creating a duplicate.
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          key: nextKey(),
+          menuItemId: item.id,
+          itemName: item.name,
+          mode: item.unitType,
+          quantityStr: item.unitType === UnitType.qty ? '1' : '',
+          unitPriceStr: String(paiseToRupees(item.defaultPrice)),
+          amountStr: '',
+        },
+      ];
+    });
     setError(null);
   };
 
@@ -139,16 +194,33 @@ export default function BillingScreen({ route, navigation }: Props) {
 
   const removeLine = (key: string) => setCart((prev) => prev.filter((l) => l.key !== key));
 
-  const autoFillCash = () => {
-    // Convenience: put the whole outstanding into cash (fastest common case).
-    setCash(String(paiseToRupees(billTotal)));
+  const selectMode = (mode: PaymentMode) => setPaymentMode(mode);
+
+  const enableSplit = () => {
+    if (paymentMode) {
+      const rupees = billTotal > 0 ? String(paiseToRupees(billTotal)) : '';
+      setCash(paymentMode === PaymentMode.cash ? rupees : '');
+      setOnline(paymentMode === PaymentMode.online ? rupees : '');
+      setUdhar(paymentMode === PaymentMode.udhar ? rupees : '');
+    }
+    setSplitPayment(true);
+  };
+
+  const disableSplit = () => {
+    setSplitPayment(false);
+    setCash('');
     setOnline('');
     setUdhar('');
   };
 
   const confirm = async () => {
     setError(null);
-    if (cart.length === 0) return setError('Add at least one item.');
+    if (!cartHasItems) return setError('Add at least one item.');
+    if (!cartLinesValid) {
+      return setError('Some items are incomplete — enter a valid quantity/price or amount.');
+    }
+    if (billTotal <= 0) return setError('Bill total must be greater than zero.');
+    if (splits.length === 0) return setError('Select a payment mode.');
 
     let lines: DraftLineInput[];
     try {
@@ -158,6 +230,10 @@ export default function BillingScreen({ route, navigation }: Props) {
     }
 
     const customerHasPhone = customerPhone.trim().length > 0;
+    if (needsPhone && !customerHasPhone) {
+      return setError('Phone number is required when any amount is on udhar.');
+    }
+
     const check = validateBill({ total: billTotal, splits, customerHasPhone });
     if (!check.ok) return setError(check.errors.join('\n'));
 
@@ -166,10 +242,10 @@ export default function BillingScreen({ route, navigation }: Props) {
       const draft = draftBillId ? await getBill(draftBillId) : await createDraftBill();
 
       let customerId: string | undefined;
-      if (customerName.trim() || udharAmount > 0) {
-        const customer = await createCustomer({
+      if (needsPhone) {
+        const customer = await findOrCreateCustomer({
           name: customerName.trim() || 'Walk-in',
-          phone: customerPhone.trim() || undefined,
+          phone: customerPhone.trim(),
         });
         customerId = customer.id;
       }
@@ -187,108 +263,141 @@ export default function BillingScreen({ route, navigation }: Props) {
     }
   };
 
-  const balanceOff = paidTotal !== billTotal;
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      {/* Menu picker */}
-      <Text style={styles.section}>Add items</Text>
-      <View style={styles.chips}>
-        {menuItems.map((item) => (
-          <Pressable key={item.id} style={styles.chip} onPress={() => addFromMenu(item)}>
-            <Text style={styles.chipText}>{item.name}</Text>
-          </Pressable>
-        ))}
-        {menuItems.length === 0 ? <Text style={styles.muted}>No active menu items.</Text> : null}
+    <View style={styles.screen}>
+      <View style={styles.stickyTotal}>
+        <Text style={styles.stickyLabel}>Total</Text>
+        <Text style={styles.stickyValue}>{formatPaise(billTotal)}</Text>
       </View>
 
-      {/* Cart */}
-      <Text style={styles.section}>Bill</Text>
-      {cart.length === 0 ? <Text style={styles.muted}>Tap an item above to start.</Text> : null}
-      {cart.map((line) => (
-        <View key={line.key} style={styles.cartLine}>
-          <View style={styles.cartHeader}>
-            <Text style={styles.cartName}>{line.itemName}</Text>
-            <Text style={styles.cartTotal}>{formatPaise(lineTotalSafe(line))}</Text>
-          </View>
-          <View style={styles.cartInputs}>
-            {line.mode === UnitType.qty ? (
-              <>
-                <TextInput
-                  style={styles.smallInput}
-                  placeholder="Qty"
-                  keyboardType="decimal-pad"
-                  value={line.quantityStr}
-                  onChangeText={(v) => patchLine(line.key, { quantityStr: v })}
-                />
-                <Text style={styles.times}>×</Text>
-                <TextInput
-                  style={styles.smallInput}
-                  placeholder="₹/unit"
-                  keyboardType="decimal-pad"
-                  value={line.unitPriceStr}
-                  onChangeText={(v) => patchLine(line.key, { unitPriceStr: v })}
-                />
-              </>
-            ) : (
-              <TextInput
-                style={styles.smallInput}
-                placeholder="₹ amount"
-                keyboardType="decimal-pad"
-                value={line.amountStr}
-                onChangeText={(v) => patchLine(line.key, { amountStr: v })}
-              />
-            )}
-            <Pressable style={styles.remove} onPress={() => removeLine(line.key)}>
-              <Text style={styles.removeText}>✕</Text>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {/* Menu picker */}
+        <Text style={styles.section}>Add items</Text>
+        <View style={styles.chips}>
+          {menuItems.map((item) => (
+            <Pressable key={item.id} style={styles.chip} onPress={() => addFromMenu(item)}>
+              <Text style={styles.chipText}>{item.name}</Text>
             </Pressable>
-          </View>
+          ))}
+          {menuItems.length === 0 ? <Text style={styles.muted}>No active menu items.</Text> : null}
         </View>
-      ))}
 
-      <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{formatPaise(billTotal)}</Text>
-      </View>
+        {/* Cart */}
+        <Text style={styles.section}>Bill</Text>
+        {cart.length === 0 ? <Text style={styles.muted}>Tap an item above to start.</Text> : null}
+        {cart.map((line) => {
+          const incomplete = !isLineComplete(line);
+          return (
+            <View key={line.key} style={styles.cartLine}>
+              <View style={styles.cartHeader}>
+                <Text style={styles.cartName}>{line.itemName}</Text>
+                <Text style={styles.cartTotal}>{formatPaise(lineTotalSafe(line))}</Text>
+              </View>
+              <View style={styles.cartInputs}>
+                {line.mode === UnitType.qty ? (
+                  <>
+                    <TextInput
+                      style={styles.smallInput}
+                      placeholder="Qty"
+                      keyboardType="decimal-pad"
+                      value={line.quantityStr}
+                      onChangeText={(v) => patchLine(line.key, { quantityStr: v })}
+                    />
+                    <Text style={styles.times}>×</Text>
+                    <TextInput
+                      style={styles.smallInput}
+                      placeholder="₹/unit"
+                      keyboardType="decimal-pad"
+                      value={line.unitPriceStr}
+                      onChangeText={(v) => patchLine(line.key, { unitPriceStr: v })}
+                    />
+                  </>
+                ) : (
+                  <TextInput
+                    style={styles.smallInput}
+                    placeholder="₹ amount"
+                    keyboardType="decimal-pad"
+                    value={line.amountStr}
+                    onChangeText={(v) => patchLine(line.key, { amountStr: v })}
+                  />
+                )}
+                <Pressable style={styles.remove} onPress={() => removeLine(line.key)}>
+                  <Text style={styles.removeText}>✕</Text>
+                </Pressable>
+              </View>
+              {incomplete ? <Text style={styles.lineWarning}>Enter a valid amount.</Text> : null}
+            </View>
+          );
+        })}
 
-      {/* Customer */}
-      <Text style={styles.section}>Customer {udharAmount > 0 ? '(phone required for udhar)' : '(optional)'}</Text>
-      <TextInput style={styles.input} placeholder="Name" value={customerName} onChangeText={setCustomerName} />
-      <TextInput
-        style={styles.input}
-        placeholder="Phone (WhatsApp)"
-        keyboardType="phone-pad"
-        value={customerPhone}
-        onChangeText={setCustomerPhone}
-      />
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Total</Text>
+          <Text style={styles.totalValue}>{formatPaise(billTotal)}</Text>
+        </View>
 
-      {/* Payment */}
-      <View style={styles.payHeader}>
+        {/* Payment */}
         <Text style={styles.section}>Payment</Text>
-        <Pressable onPress={autoFillCash}>
-          <Text style={styles.autofill}>All cash</Text>
+        {!splitPayment ? (
+          <View style={styles.modeRow}>
+            {PAYMENT_MODES.map((mode) => (
+              <Pressable
+                key={mode}
+                style={[styles.modeBtn, paymentMode === mode && styles.modeBtnActive]}
+                onPress={() => selectMode(mode)}
+              >
+                <Text style={[styles.modeBtnText, paymentMode === mode && styles.modeBtnTextActive]}>
+                  {MODE_LABELS[mode]}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.payRow}>
+            <PayInput label="Cash" value={cash} onChange={setCash} />
+            <PayInput label="Online" value={online} onChange={setOnline} />
+            <PayInput label="Udhar" value={udhar} onChange={setUdhar} />
+          </View>
+        )}
+
+        <Pressable onPress={splitPayment ? disableSplit : enableSplit}>
+          <Text style={styles.splitLink}>{splitPayment ? 'Use single payment mode' : 'Split payment'}</Text>
         </Pressable>
-      </View>
-      <View style={styles.payRow}>
-        <PayInput label="Cash" value={cash} onChange={setCash} />
-        <PayInput label="Online" value={online} onChange={setOnline} />
-        <PayInput label="Udhar" value={udhar} onChange={setUdhar} />
-      </View>
-      <Text style={[styles.balance, balanceOff && billTotal > 0 ? styles.balanceBad : styles.balanceOk]}>
-        Paid {formatPaise(paidTotal)} / {formatPaise(billTotal)}
-        {balanceOff && billTotal > 0 ? '  ·  does not match' : ''}
-      </Text>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        {splitPayment ? (
+          <Text style={[styles.balance, paymentMismatch && billTotal > 0 ? styles.balanceBad : styles.balanceOk]}>
+            Paid {formatPaise(paidTotal)} / {formatPaise(billTotal)}
+            {paymentMismatch && billTotal > 0
+              ? `  ·  off by ${formatPaise(Math.abs(paidTotal - billTotal))}`
+              : ''}
+          </Text>
+        ) : null}
 
-      <Pressable
-        style={[styles.confirm, saving && styles.confirmDisabled]}
-        disabled={saving}
-        onPress={confirm}
-      >
-        <Text style={styles.confirmText}>{saving ? 'Saving…' : 'Confirm & Save'}</Text>
-      </Pressable>
-    </ScrollView>
+        {/* Customer — only relevant once udhar is involved */}
+        {needsPhone ? (
+          <>
+            <Text style={styles.section}>Customer (phone required for udhar)</Text>
+            <TextInput style={styles.input} placeholder="Name" value={customerName} onChangeText={setCustomerName} />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone (WhatsApp)"
+              keyboardType="phone-pad"
+              value={customerPhone}
+              onChangeText={setCustomerPhone}
+            />
+          </>
+        ) : null}
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <Pressable
+          style={[styles.confirm, !canConfirm && styles.confirmDisabled]}
+          disabled={!canConfirm}
+          onPress={confirm}
+        >
+          <Text style={styles.confirmText}>{saving ? 'Saving…' : 'Confirm & Save'}</Text>
+        </Pressable>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -302,6 +411,19 @@ function PayInput({ label, value, onChange }: { label: string; value: string; on
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: '#fff' },
+  stickyTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff3ef',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0d2c8',
+  },
+  stickyLabel: { fontSize: 13, fontWeight: '700', color: '#b8320f', textTransform: 'uppercase' },
+  stickyValue: { fontSize: 20, fontWeight: '800', color: '#b8320f' },
   container: { flex: 1, backgroundColor: '#fff' },
   content: { padding: 16, paddingBottom: 48 },
   section: { fontSize: 13, fontWeight: '700', color: '#888', marginTop: 18, marginBottom: 8, textTransform: 'uppercase' },
@@ -318,17 +440,30 @@ const styles = StyleSheet.create({
   times: { color: '#999' },
   remove: { padding: 8 },
   removeText: { color: '#c0392b', fontSize: 16 },
+  lineWarning: { color: '#c0392b', fontSize: 12, marginTop: 6 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eee' },
   totalLabel: { fontSize: 16, fontWeight: '700', color: '#333' },
   totalValue: { fontSize: 20, fontWeight: '800', color: '#b8320f' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff', marginBottom: 8 },
-  payHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  autofill: { color: '#b8320f', fontWeight: '600', marginBottom: 8 },
+  modeRow: { flexDirection: 'row', gap: 8 },
+  modeBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  modeBtnActive: { backgroundColor: '#b8320f', borderColor: '#b8320f' },
+  modeBtnText: { fontSize: 15, fontWeight: '700', color: '#555' },
+  modeBtnTextActive: { color: '#fff' },
+  splitLink: { color: '#b8320f', fontWeight: '600', marginTop: 10, textAlign: 'center' },
   payRow: { flexDirection: 'row', gap: 8 },
   payCol: { flex: 1 },
   payLabel: { fontSize: 12, color: '#888', marginBottom: 4 },
   payInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: '#fff', textAlign: 'center' },
-  balance: { marginTop: 8, fontSize: 13, textAlign: 'center' },
+  balance: { marginTop: 10, fontSize: 13, textAlign: 'center' },
   balanceOk: { color: '#2e7d32' },
   balanceBad: { color: '#c0392b' },
   error: { color: '#c0392b', marginTop: 12, fontSize: 13 },

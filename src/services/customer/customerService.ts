@@ -43,6 +43,24 @@ export function createCustomer(input: CustomerInput): Promise<Customer> {
   );
 }
 
+/** Look up a customer by phone (normalised). Phone, not name, is the identity key. */
+export async function findCustomerByPhone(phone: string): Promise<Customer | undefined> {
+  const normalised = normalisePhone(phone);
+  if (!normalised) return undefined;
+  const matches = await customerCollection().query(Q.where('phone', normalised)).fetch();
+  return matches[0];
+}
+
+/**
+ * Find an existing customer by phone, or create a new one. Duplicate customer *names*
+ * are expected and must not cause duplicate records — phone is the match key.
+ */
+export async function findOrCreateCustomer(input: CustomerInput): Promise<Customer> {
+  const existing = input.phone ? await findCustomerByPhone(input.phone) : undefined;
+  if (existing) return existing;
+  return createCustomer(input);
+}
+
 export interface CustomerPatch {
   name?: string;
   phone?: string;

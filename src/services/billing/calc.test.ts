@@ -7,6 +7,7 @@ import {
   validateBill,
   udharBalance,
   signedUdharAmount,
+  ROUNDING_TOLERANCE_PAISE,
   type LineInput,
   type SplitInput,
 } from './calc';
@@ -35,6 +36,18 @@ describe('computeLineTotal', () => {
     expect(() => computeLineTotal({ mode: UnitType.amount })).toThrow();
     expect(() => computeLineTotal({ mode: UnitType.qty, quantity: -1, unitPrice: 100 })).toThrow();
     expect(() => computeLineTotal({ mode: UnitType.amount, amount: -5 })).toThrow();
+  });
+
+  it('throws on NaN inputs (empty text field parsed with parseFloat) instead of returning NaN', () => {
+    // Regression: an empty "by amount" field must never silently contribute NaN to the bill total.
+    expect(() => computeLineTotal({ mode: UnitType.amount, amount: NaN })).toThrow();
+    expect(() => computeLineTotal({ mode: UnitType.qty, quantity: NaN, unitPrice: 100 })).toThrow();
+    expect(() => computeLineTotal({ mode: UnitType.qty, quantity: 1, unitPrice: NaN })).toThrow();
+  });
+
+  it('supports fractional-rupee prices (weight-based items)', () => {
+    // ₹320.50/kg (32050 paise) x 1 = 32050 paise, no forced rounding to whole rupees.
+    expect(computeLineTotal({ mode: UnitType.qty, quantity: 1, unitPrice: 32050 })).toBe(32050);
   });
 });
 
@@ -92,6 +105,36 @@ describe('validateBill', () => {
     const res = validateBill({
       total: 8000,
       splits: [{ mode: PaymentMode.cash, amount: 5000 }],
+      customerHasPhone: false,
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it('displays the mismatch error in rupees, not raw paise', () => {
+    const res = validateBill({
+      total: 8000, // ₹80.00
+      splits: [{ mode: PaymentMode.cash, amount: 5000 }], // ₹50.00
+      customerHasPhone: false,
+    });
+    expect(res.errors.join(' ')).toContain('₹50.00');
+    expect(res.errors.join(' ')).toContain('₹80.00');
+    expect(res.errors.join(' ')).not.toMatch(/\(5000\)/);
+    expect(res.errors.join(' ')).not.toMatch(/\(8000\)/);
+  });
+
+  it('accepts a payment within the ₹2 rounding tolerance', () => {
+    const res = validateBill({
+      total: 32050, // ₹320.50
+      splits: [{ mode: PaymentMode.cash, amount: 32050 - ROUNDING_TOLERANCE_PAISE }], // ₹318.50
+      customerHasPhone: false,
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rejects a payment just past the ₹2 rounding tolerance', () => {
+    const res = validateBill({
+      total: 32050,
+      splits: [{ mode: PaymentMode.cash, amount: 32050 - ROUNDING_TOLERANCE_PAISE - 1 }],
       customerHasPhone: false,
     });
     expect(res.ok).toBe(false);

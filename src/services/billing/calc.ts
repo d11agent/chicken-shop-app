@@ -1,9 +1,16 @@
 import { PaymentMode, UnitType, type UdharEntryType, UDHAR_SIGN } from '../../db/constants';
+import { formatPaise } from '../currency';
 
 /**
  * Pure billing math — no DB, no side effects. All money is INTEGER PAISE.
  * This is the financial core; keep it exhaustively tested (see calc.test.ts).
  */
+
+/**
+ * Shopkeepers round off cash by hand (e.g. take ₹320 for a ₹320.50 bill).
+ * Payments within this tolerance of the bill total are accepted as a match.
+ */
+export const ROUNDING_TOLERANCE_PAISE = 200; // ₹2
 
 /** Input describing one line before it is persisted. */
 export interface LineInput {
@@ -32,7 +39,7 @@ export function computeLineTotal(line: LineInput): number {
   if (line.mode === UnitType.qty) {
     const q = line.quantity;
     const p = line.unitPrice;
-    if (q == null || p == null) {
+    if (q == null || p == null || !Number.isFinite(q) || !Number.isFinite(p)) {
       throw new Error('qty line requires quantity and unitPrice');
     }
     if (q < 0 || p < 0) throw new Error('qty line values must be non-negative');
@@ -40,7 +47,7 @@ export function computeLineTotal(line: LineInput): number {
   }
   // amount mode
   const a = line.amount;
-  if (a == null) throw new Error('amount line requires amount');
+  if (a == null || !Number.isFinite(a)) throw new Error('amount line requires amount');
   if (a < 0) throw new Error('amount must be non-negative');
   return Math.round(a);
 }
@@ -92,8 +99,10 @@ export function validateBill(params: {
   if (splits.some((s) => s.amount < 0)) errors.push('Payment amounts cannot be negative.');
 
   const paid = sumSplits(splits);
-  if (paid !== total) {
-    errors.push(`Payments (${paid}) must equal bill total (${total}).`);
+  if (Math.abs(paid - total) > ROUNDING_TOLERANCE_PAISE) {
+    errors.push(
+      `Payments (${formatPaise(paid)}) must equal bill total (${formatPaise(total)}) — off by ${formatPaise(Math.abs(paid - total))}.`,
+    );
   }
 
   if (requiresPhone(splits) && !customerHasPhone) {
