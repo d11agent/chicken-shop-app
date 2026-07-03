@@ -23,7 +23,7 @@ import {
 import type { DraftLineInput } from '../services/billing/types';
 import { findOrCreateCustomer, getCustomer } from '../services/customer/customerService';
 import { UnitType, PaymentMode } from '../db/constants';
-import { formatPaise, rupeesToPaise, paiseToRupees } from '../services/currency';
+import { formatPaise, rupeesToPaise, paiseToRupees, sanitizeDecimalInput } from '../services/currency';
 import type { MenuItem } from '../db/models';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Billing'>;
@@ -142,7 +142,7 @@ export default function BillingScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!splitPayment || udharTouched) return;
     const remaining = billTotal - paise(cash) - paise(online);
-    const next = remaining > 0 ? String(paiseToRupees(remaining)) : '0';
+    const next = remaining > 0 ? sanitizeDecimalInput(String(paiseToRupees(remaining))) : '0';
     setUdhar((prev) => (prev === next ? prev : next));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitPayment, udharTouched, billTotal, cash, online]);
@@ -320,7 +320,7 @@ export default function BillingScreen({ route, navigation }: Props) {
                       placeholder="Qty"
                       keyboardType="decimal-pad"
                       value={line.quantityStr}
-                      onChangeText={(v) => patchLine(line.key, { quantityStr: v })}
+                      onChangeText={(v) => patchLine(line.key, { quantityStr: sanitizeDecimalInput(v) })}
                     />
                     <Text style={styles.times}>×</Text>
                     <TextInput
@@ -328,7 +328,7 @@ export default function BillingScreen({ route, navigation }: Props) {
                       placeholder="₹/unit"
                       keyboardType="decimal-pad"
                       value={line.unitPriceStr}
-                      onChangeText={(v) => patchLine(line.key, { unitPriceStr: v })}
+                      onChangeText={(v) => patchLine(line.key, { unitPriceStr: sanitizeDecimalInput(v) })}
                     />
                   </>
                 ) : (
@@ -337,7 +337,7 @@ export default function BillingScreen({ route, navigation }: Props) {
                     placeholder="₹ amount"
                     keyboardType="decimal-pad"
                     value={line.amountStr}
-                    onChangeText={(v) => patchLine(line.key, { amountStr: v })}
+                    onChangeText={(v) => patchLine(line.key, { amountStr: sanitizeDecimalInput(v) })}
                   />
                 )}
                 <Pressable style={styles.remove} onPress={() => removeLine(line.key)}>
@@ -424,7 +424,13 @@ function PayInput({ label, value, onChange }: { label: string; value: string; on
   return (
     <View style={styles.payCol}>
       <Text style={styles.payLabel}>{label}</Text>
-      <TextInput style={styles.payInput} placeholder="0" keyboardType="decimal-pad" value={value} onChangeText={onChange} />
+      <TextInput
+        style={styles.payInput}
+        placeholder="0"
+        keyboardType="decimal-pad"
+        value={value}
+        onChangeText={(v) => onChange(sanitizeDecimalInput(v))}
+      />
     </View>
   );
 }
