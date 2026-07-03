@@ -141,7 +141,13 @@ is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp stat
   the UI/DB flows have NOT been run on a device yet — first real run should smoke-test billing end-to-end.
 - **`.npmrc` has `legacy-peer-deps=true`** — required for RN/Expo transitive peer ranges (jest-preset 0.85 vs
   rn 0.86). Keep it; `npm install` depends on it.
-- **Babel decorators pinned to `^7`** (Expo is on Babel 7). Don't bump.
+- **Do NOT add `@babel/plugin-proposal-decorators` to `babel.config.js`.** `babel-preset-expo` (SDK 57)
+  already enables LEGACY decorators by default (`lazyDecoratorsPlugin`, `{ legacy: true }`) — exactly what
+  WatermelonDB models need. Adding the plugin manually runs a SECOND decorator transform that crashes Metro
+  on definite-assignment fields (`name!: string`) with "Definitely assigned fields cannot be initialized
+  here, but only in the constructor". `babel.config.js` is now just `presets: ['babel-preset-expo']`.
+  (Note: `tsc` + `jest` did NOT catch this — the tests only import pure calc functions, never the models,
+  so the bad transform only surfaced when Metro bundled the real app. Root cause found via `expo export`.)
 - **App id `com.chickenshop.app`** is a placeholder — change before any store submission.
 - **Menu prices are PLACEHOLDERS** (`services/menu/seed.ts`) — real menu + pricing still to be captured from
   the shop, then either edit in-app or update the seed.
