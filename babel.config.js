@@ -33,9 +33,21 @@ module.exports = function (api) {
     // property, unlike native class fields (`[[DefineOwnProperty]]`) which bypass it. Hence: "Cannot
     // assign to read-only property 'NONE'" at startup. Scoping to our models directory keeps RN's own
     // files on the default (correct, target-aware) Hermes pipeline.
+    //
+    // `test` MUST be a function, not a string/RegExp. Expo's Metro babel-transformer calls
+    // `babel.loadPartialConfigSync()` once on the main thread with NO filename, purely to enumerate
+    // which config files participate (for cache-key purposes) — see @expo/metro-config's
+    // babel-transformer.js `getCacheKey`. Babel's pattern matcher throws `ConfigError: Configuration
+    // contains string/RegExp pattern, but no filename was passed to Babel` when a string/RegExp
+    // `test` is evaluated without a filename, which crashed transformer construction entirely
+    // (Metro then threw "Cannot read properties of undefined (reading 'transformFile')" since the
+    // transformer was never built). A function pattern is simply invoked with the filename (possibly
+    // undefined) instead of being matched internally, so it never hits that code path.
     overrides: [
       {
-        test: './src/db/models',
+        test: (filePath) =>
+          typeof filePath === 'string' &&
+          filePath.replace(/\\/g, '/').includes('/src/db/models/'),
         plugins: [
           ['@babel/plugin-proposal-decorators', { legacy: true }],
           ['@babel/plugin-transform-class-properties', { loose: true }],
