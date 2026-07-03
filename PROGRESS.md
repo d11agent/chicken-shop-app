@@ -141,13 +141,27 @@ is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp stat
   the UI/DB flows have NOT been run on a device yet — first real run should smoke-test billing end-to-end.
 - **`.npmrc` has `legacy-peer-deps=true`** — required for RN/Expo transitive peer ranges (jest-preset 0.85 vs
   rn 0.86). Keep it; `npm install` depends on it.
-- **Do NOT add `@babel/plugin-proposal-decorators` to `babel.config.js`.** `babel-preset-expo` (SDK 57)
-  already enables LEGACY decorators by default (`lazyDecoratorsPlugin`, `{ legacy: true }`) — exactly what
-  WatermelonDB models need. Adding the plugin manually runs a SECOND decorator transform that crashes Metro
-  on definite-assignment fields (`name!: string`) with "Definitely assigned fields cannot be initialized
-  here, but only in the constructor". `babel.config.js` is now just `presets: ['babel-preset-expo']`.
-  (Note: `tsc` + `jest` did NOT catch this — the tests only import pure calc functions, never the models,
-  so the bad transform only surfaced when Metro bundled the real app. Root cause found via `expo export`.)
+- **`babel.config.js` is delicate — WatermelonDB decorators vs Metro/Hermes.** Final working config:
+  `presets: [['babel-preset-expo', { decorators: false }]]` + `plugins: [` legacy `proposal-decorators`,
+  then `transform-class-properties` / `transform-private-methods` / `transform-private-property-in-object`
+  all `{ loose: true }` `]`. Three separate bugs had to be solved together — do NOT "simplify" this away:
+  1. **Duplicate decorators.** preset-expo (SDK 57) enables legacy decorators by default. Adding our own
+     too = a 2nd transform that crashes Metro on `name!: string` ("Definitely assigned fields cannot be
+     initialized here"). Fix: `decorators: false` on the preset, own the decorators ourselves.
+  2. **Hermes skips class-properties.** Hermes supports native class fields, so preset-env DROPS the
+     class-properties transform → the legacy-decorator placeholder `_initializerWarningHelper` is left as
+     the field initializer → runtime crash "Decorating class property failed …". Fix: add
+     `transform-class-properties` explicitly so it always runs right after decorators.
+  3. **class-features family must be consistent.** Enabling class-properties alone breaks RN files that use
+     private methods (`#foo()`), and mismatched `loose` values throw "'loose' mode configuration must be the
+     same for …" (surfaces under jest via `@react-native/jest-preset`). Fix: enable all three class-features
+     plugins with the SAME `loose: true` RN uses.
+  Plugins are pinned `^7` (project is on `@babel/core@7`; npm will install `@8` by default — wrong).
+  **Verify any babel change with ALL of:** `npx jest` (19/19), `tsc --noEmit`, `expo export -p android`
+  (must bundle ~1210 modules with no error), and a Hermes-caller transform of `src/db/models/*.ts` (the
+  output must contain `initializerDefineProperty` and NOT use `_initializerWarningHelper` as a field init).
+  `tsc`/`jest` alone are NOT enough — the tests import only the pure calc layer, never the models, so a
+  broken model transform only shows up in the Metro bundle / on device.
 - **App id `com.chickenshop.app`** is a placeholder — change before any store submission.
 - **Menu prices are PLACEHOLDERS** (`services/menu/seed.ts`) — real menu + pricing still to be captured from
   the shop, then either edit in-app or update the seed.
