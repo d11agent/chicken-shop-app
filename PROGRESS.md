@@ -73,6 +73,15 @@ _Last updated: 2026-07-01 (Session B complete)_
 - [ ] **Session F** — Customer Insights (self-learning gaps, loyal-customer income)
 - [ ] **Session G** — Supabase background sync/backup (offline-first catch-up, strict review)
 
+## ✅ Dev build GREEN (2026-07-03)
+First successful EAS dev build after fixing the real blocker (WatermelonDB `JSIModulePackage` on
+New Arch — see gotchas). Build `f0966a28`, status **FINISHED**, `development` profile, Android APK:
+- Install page / QR: https://expo.dev/accounts/ps140888/projects/chicken-shop-app/builds/f0966a28-1c23-4b26-8df8-1d3821e79860
+- Direct APK: https://expo.dev/artifacts/eas/HaEFMcmg8urMrtWMp7ABBN4UBr8NbK186DoMu66Z-GQ.apk
+
+**Next:** install on an Android phone, run `npx expo start --dev-client`, then run the billing
+smoke-test checklist below. This is the FIRST time the DB/UI runs on a device — watch DB init.
+
 ## 🔧 Dev build + smoke test (set up — needs Banti to run interactive steps)
 Local Android toolchain is **absent on this machine** (no Java/SDK/emulator), so `expo run:android`
 won't work here. Path = **EAS cloud build** (`eas-cli` 20.3.0 is installed).
