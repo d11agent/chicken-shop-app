@@ -4,7 +4,7 @@
 > session knows exact status without re-reading everything.
 > Full spec: `chicken-shop-app-spec.md` · Project rules: `CLAUDE.md`
 
-_Last updated: 2026-07-01 (Session B complete)_
+_Last updated: 2026-07-03 (New Bill screen payment/customer/items refactor)_
 
 ---
 
@@ -63,6 +63,33 @@ _Last updated: 2026-07-01 (Session B complete)_
   - **Verify:** `tsc --noEmit` clean · `jest` **19/19** · `expo-doctor` **20/20**.
   - **Note:** billing UI builds the cart in local React state (speed), persisting only on confirm; the
     service layer still fully supports incremental *persisted* drafts (used by void+recreate).
+
+- **New Bill screen — payment/customer/items refactor** ✅ (2026-07-03, commits `ed79804`, `3636af9`)
+  - **Payment:** default is single-tap Cash/Online/Udhar (full total auto-assigned to the chosen mode);
+    a "Split payment" link reveals the old three manual amount fields. In split mode, **Udhar
+    auto-recalculates live** as `max(0, total − cash − online)` while the shopkeeper hasn't typed into
+    it directly — a manual edit to Udhar sets a `udharTouched` flag that stops the auto-calc for the
+    rest of that split session (reset when Split payment is re-opened).
+  - **Rounding tolerance:** payments within **₹2** of the bill total are accepted (`ROUNDING_TOLERANCE_PAISE`
+    in `calc.ts`) — shopkeepers round off cash by hand. Beyond ₹2, Confirm & Save is disabled and the
+    mismatch shows in **rupees** (fixed a bug where `validateBill()` errors leaked raw paise, e.g. "5000",
+    into the UI instead of "₹50.00").
+  - **NaN guard:** `computeLineTotal()` now rejects `NaN` — an empty "by amount" field (Masala/Extra,
+    Packing) no longer silently contributes `NaN` to the running total.
+  - **Customer matching fixed:** new `findOrCreateCustomer()` / `findCustomerByPhone()` in
+    `customerService.ts` match by **phone**, not name — replaces the old always-create-new-row behavior
+    that produced duplicate customer records for repeat visitors (was tracked as a known gap). Name/phone
+    fields are now hidden unless Udhar is active (single-tap or split), and phone is mandatory + blocks
+    save in that case.
+  - **Items:** tapping the same menu item twice now merges into one line (qty += 1) instead of creating a
+    duplicate; per-bill price overrides still never touch the menu item's default price.
+  - **UX:** running total is now a sticky header (always visible, not just at the bottom); Confirm & Save
+    is disabled up-front (not just error-on-tap) for an empty cart, zero total, any incomplete/zero/negative
+    item line, no payment mode chosen, or a split mismatch beyond ₹2.
+  - **Verify:** `tsc --noEmit` clean · `jest` **24/24** (5 new: NaN-guard regression, fractional-rupee
+    price, rupee-formatted mismatch message, ±₹2 tolerance accept/reject) · manual edge-case pass over
+    single-tap autofill, cash-only/cash+online Udhar recalc, manual-Udhar-stops-recalc, and overpay-clamps-
+    to-zero.
 
 ## ⏳ Pending (MVP Layer 1 — planned session breakdown)
 - [x] **Session A** — Expo scaffold + WatermelonDB schema + data model (foundation, solo) ✅
@@ -165,8 +192,6 @@ is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp stat
 - **App id `com.chickenshop.app`** is a placeholder — change before any store submission.
 - **Menu prices are PLACEHOLDERS** (`services/menu/seed.ts`) — real menu + pricing still to be captured from
   the shop, then either edit in-app or update the seed.
-- **Billing UI creates a fresh customer per bill when a name/udhar is present** (no dedup yet) — customer
-  matching/dedup is a later concern (spec §4.3 / Session F). Fine for now.
 - No Supabase config yet (deferred to Session G); offline-first local DB is fully standalone until then.
 
 ## 📌 Open questions / notes
