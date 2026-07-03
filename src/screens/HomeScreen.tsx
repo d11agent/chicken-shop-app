@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '../navigation/RootNavigator';
+import { database } from '../db';
 import { seedMenuIfEmpty } from '../services/menu/seed';
 import { formatIst } from '../services/time';
 
@@ -17,12 +18,40 @@ const TILES: { label: string; screen: keyof RootStackParamList; hint: string }[]
 
 export default function HomeScreen({ navigation }: Props) {
   const [seedNote, setSeedNote] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     seedMenuIfEmpty()
       .then((seeded) => seeded && setSeedNote('Default menu loaded — edit prices in Menu.'))
       .catch((e) => setSeedNote(`Menu seed failed: ${e instanceof Error ? e.message : e}`));
   }, []);
+
+  const confirmResetDevData = () => {
+    Alert.alert(
+      'Reset local data?',
+      'Wipes ALL bills, customers, udhar entries, and menu items on this device and reloads the ' +
+        'default menu. Only use this for test/dev data — it cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Wipe & reset',
+          style: 'destructive',
+          onPress: async () => {
+            setResetting(true);
+            try {
+              await database.write(() => database.unsafeResetDatabase());
+              await seedMenuIfEmpty();
+              setSeedNote('Local data wiped — default menu reloaded.');
+            } catch (e) {
+              setSeedNote(`Reset failed: ${e instanceof Error ? e.message : e}`);
+            } finally {
+              setResetting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -42,6 +71,17 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {seedNote ? <Text style={styles.note}>{seedNote}</Text> : null}
+
+      {__DEV__ ? (
+        <Pressable
+          style={({ pressed }) => [styles.devReset, pressed && styles.tilePressed]}
+          disabled={resetting}
+          onPress={confirmResetDevData}
+        >
+          <Text style={styles.devResetText}>{resetting ? 'Wiping…' : '⚠️ Reset local data (dev)'}</Text>
+        </Pressable>
+      ) : null}
+
       <StatusBar style="light" />
     </View>
   );
@@ -56,4 +96,13 @@ const styles = StyleSheet.create({
   tileLabel: { fontSize: 20, fontWeight: '700', color: '#b8320f' },
   tileHint: { fontSize: 13, color: '#8a6a60', marginTop: 4 },
   note: { marginTop: 20, fontSize: 12, color: '#2e7d32', textAlign: 'center' },
+  devReset: {
+    marginTop: 28,
+    borderWidth: 1,
+    borderColor: '#c0392b',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  devResetText: { color: '#c0392b', fontWeight: '700', fontSize: 13 },
 });
