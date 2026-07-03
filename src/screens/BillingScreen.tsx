@@ -95,6 +95,7 @@ export default function BillingScreen({ route, navigation }: Props) {
   const [cash, setCash] = useState('');
   const [online, setOnline] = useState('');
   const [udhar, setUdhar] = useState('');
+  const [udharTouched, setUdharTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -134,6 +135,17 @@ export default function BillingScreen({ route, navigation }: Props) {
   const cartLinesValid = cartHasItems && cart.every(isLineComplete);
 
   const paise = (s: string) => (s.trim() === '' ? 0 : rupeesToPaise(parseFloat(s)) || 0);
+
+  // Udhar auto-fills as the remainder (total - cash - online) while the shopkeeper
+  // hasn't typed into it directly — the moment they do, their input wins for the rest
+  // of this split session (reset when Split payment is re-opened).
+  useEffect(() => {
+    if (!splitPayment || udharTouched) return;
+    const remaining = billTotal - paise(cash) - paise(online);
+    const next = remaining > 0 ? String(paiseToRupees(remaining)) : '0';
+    setUdhar((prev) => (prev === next ? prev : next));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitPayment, udharTouched, billTotal, cash, online]);
 
   const splits: SplitInput[] = useMemo(() => {
     if (splitPayment) {
@@ -197,6 +209,7 @@ export default function BillingScreen({ route, navigation }: Props) {
   const selectMode = (mode: PaymentMode) => setPaymentMode(mode);
 
   const enableSplit = () => {
+    setUdharTouched(false);
     if (paymentMode) {
       const rupees = billTotal > 0 ? String(paiseToRupees(billTotal)) : '';
       setCash(paymentMode === PaymentMode.cash ? rupees : '');
@@ -208,9 +221,15 @@ export default function BillingScreen({ route, navigation }: Props) {
 
   const disableSplit = () => {
     setSplitPayment(false);
+    setUdharTouched(false);
     setCash('');
     setOnline('');
     setUdhar('');
+  };
+
+  const onUdharChange = (v: string) => {
+    setUdharTouched(true);
+    setUdhar(v);
   };
 
   const confirm = async () => {
@@ -355,7 +374,7 @@ export default function BillingScreen({ route, navigation }: Props) {
           <View style={styles.payRow}>
             <PayInput label="Cash" value={cash} onChange={setCash} />
             <PayInput label="Online" value={online} onChange={setOnline} />
-            <PayInput label="Udhar" value={udhar} onChange={setUdhar} />
+            <PayInput label="Udhar" value={udhar} onChange={onUdharChange} />
           </View>
         )}
 
