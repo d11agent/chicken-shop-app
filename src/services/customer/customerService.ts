@@ -26,6 +26,11 @@ export function getCustomer(id: string): Promise<Customer> {
   return customerCollection().find(id);
 }
 
+/** Reactive single-customer query (WatermelonDB has no observe-by-id, so filter by id). */
+export function observeCustomerById(id: string): Query<Customer> {
+  return customerCollection().query(Q.where('id', id));
+}
+
 /** Normalise a phone to digits only (keeps a leading +). Empty -> undefined. */
 export function normalisePhone(phone?: string): string | undefined {
   if (!phone) return undefined;

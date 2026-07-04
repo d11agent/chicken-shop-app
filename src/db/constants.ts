@@ -40,13 +40,14 @@ export type PaymentMode = (typeof PaymentMode)[keyof typeof PaymentMode];
 
 /**
  * Append-only udhar ledger entry types.
- * Balance = SUM(debit) - SUM(payment) - SUM(writeoff) - SUM(void_reversal).
+ * Balance = SUM(debit) - SUM(payment) - SUM(writeoff) - SUM(void_reversal) + SUM(writeoff_reversal).
  */
 export const UdharEntryType = {
   debit: 'debit', // credit given (udhar taken on a bill)
   payment: 'payment', // customer paid back (partial payments allowed)
   writeoff: 'writeoff', // bad debt written off (counted as loss in net profit)
   voidReversal: 'void_reversal', // cancels a debit when its bill is voided (append-only, never delete)
+  writeoffReversal: 'writeoff_reversal', // cancels a writeoff (customer unexpectedly pays after all)
 } as const;
 export type UdharEntryType = (typeof UdharEntryType)[keyof typeof UdharEntryType];
 
@@ -56,6 +57,7 @@ export const UDHAR_SIGN: Record<UdharEntryType, 1 | -1> = {
   payment: -1,
   writeoff: -1,
   void_reversal: -1,
+  writeoff_reversal: 1,
 };
 
 /** Udhar entry status — display hint only, never the source of truth for balance. */

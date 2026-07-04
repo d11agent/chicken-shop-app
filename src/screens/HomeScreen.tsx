@@ -13,6 +13,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const TILES: { label: string; screen: keyof RootStackParamList; hint: string }[] = [
   { label: '🧾  New Bill', screen: 'Billing', hint: 'Quick billing — cash / online / udhar' },
   { label: '📋  Bills', screen: 'Bills', hint: 'Recent bills · void + recreate' },
+  { label: '💰  Udhar', screen: 'Udhar', hint: 'Credit ledger · aging · payments' },
   { label: '🍗  Menu & Prices', screen: 'Menu', hint: 'Edit items and default prices' },
 ];
 

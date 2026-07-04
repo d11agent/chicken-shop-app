@@ -4,7 +4,7 @@
 > session knows exact status without re-reading everything.
 > Full spec: `chicken-shop-app-spec.md` · Project rules: `CLAUDE.md`
 
-_Last updated: 2026-07-03 (New Bill screen payment/customer/items refactor)_
+_Last updated: 2026-07-04 (Session C — Udhar ledger + Payments)_
 
 ---
 
@@ -91,10 +91,36 @@ _Last updated: 2026-07-03 (New Bill screen payment/customer/items refactor)_
     single-tap autofill, cash-only/cash+online Udhar recalc, manual-Udhar-stops-recalc, and overpay-clamps-
     to-zero.
 
+- **Session C — Udhar ledger + Payments** ✅ (2026-07-04)
+  - **`writeoff_reversal`** added to `UdharEntryType`/`UDHAR_SIGN` (sign `+1`, value-only, no migration —
+    same pattern as `void_reversal`). Lets a write-off be reversed later without ever deleting/mutating
+    the original ledger entry (only its display-only `status` flips back to `active`).
+  - **`services/udhar/udharCalc.ts`** (pure, no DB, exhaustively tested): `oldestUnsettledDebitDate`
+    (FIFO — aging anchored to the ORIGINAL debit date, not reset by partial payments), `lastPaymentDate`,
+    `agingFlag` (15+/60+ day thresholds), `advanceCredit`/`outstandingBalance` (clamp the existing signed
+    `udharBalance` — overpayment nets into a new debit as **pure arithmetic**, no special-case code
+    needed anywhere, including `confirmBill`), `summarizeByCustomer` + `sortByAgingThenAmount` (oldest
+    first, ties broken by balance desc), `assertPositivePaise` guard.
+  - **`services/udhar/udharService.ts`**: `recordPayment` (no cap — overpayment is intentional),
+    `writeOffUdhar` (capped at current outstanding balance), `reverseWriteOff` (re-fetches the row
+    inside the writer to close a double-tap race on the "already reversed" guard).
+  - **`observeCustomerById`** added to `customerService.ts` (same no-observe-by-id workaround as
+    `billService.observeBillById`).
+  - **UI**: `UdharScreen` (aging-sorted pending list + advance-credit section + required-Name+Phone
+    "find/start ledger" form using the existing `findOrCreateCustomer` — no second customer-matching
+    path), `CustomerLedgerScreen` (balance/aging header, record-payment + write-off mini-forms reusing
+    `sanitizeDecimalInput`, full history with a "Reverse" action on active write-offs). New Home tile +
+    `Udhar`/`CustomerLedger` routes in `RootNavigator`.
+  - **Verify:** `tsc --noEmit` clean · `jest` **57/57** (33 new: FIFO aging incl. the void-reversal fix,
+    write-off reversal, overpayment→advance-credit→auto-net, sort tie-break, positive-amount guard) ·
+    `expo-doctor` 19/20 (pre-existing patch-version drift in `expo`/`expo-build-properties`/
+    `expo-dev-client`/`jest-expo`, unrelated to this session — no dependency touched). **Not yet run on
+    a device** (no Android toolchain on this machine) — see smoke-test checklist addition below.
+
 ## ⏳ Pending (MVP Layer 1 — planned session breakdown)
 - [x] **Session A** — Expo scaffold + WatermelonDB schema + data model (foundation, solo) ✅
 - [x] **Session B** — Quick Billing + Menu/Price (draft→confirm→void, frozen price snapshot) ✅
-- [ ] **Session C** — Udhar ledger + Payments (append-only, aging flags 15/60 days)
+- [x] **Session C** — Udhar ledger + Payments (append-only, aging flags 15/60 days) ✅
 - [ ] **Session D** — WhatsApp/SMS share + retry queue (native intents, pending/sent status)
 - [ ] **Session E** — Daily Summary + Raw Material + Wastage tracking
 - [ ] **Session F** — Customer Insights (self-learning gaps, loyal-customer income)
@@ -134,14 +160,26 @@ New Bill: add a qty line (kg×₹) + an amount line (₹) → split cash/online/
 confirm again (new bill should reference the voided one).
 
 ## ➡️ Next step
-**Session C: Udhar ledger + Payments.**
-Model: Opus (financial logic). Build: customer udhar statement screen (append-only history + running
-balance via `udharBalance`), record **partial payments** (append `payment` entry, independent of bills),
-aging flags (15+ yellow / 60+ red from oldest unsettled debit), bad-debt **write-off** (append `writeoff`,
-counts as loss). The ledger + calc (`udharBalance`, signed entries) already exist from Session B — Session C
-is mostly UI + the payment/writeoff service methods + aging logic. WhatsApp statement is Session D.
+**Session D: WhatsApp/SMS share + retry queue.**
+Model: Opus/Sonnet mix (native intents = simpler, retry queue = more care). Build: `wa.me`/`sms:` native
+share intents for bills and udhar statements (current transaction + running balance), Pending→Sent status
+per bill, background auto-retry queue for when a share fails/offline. Session C's `CustomerLedgerScreen`
+already has everything a statement message needs (balance, history, aging) — D is mostly the
+share-intent + retry-queue plumbing, not new ledger logic.
+
+**Ideas backlog** (not scope for the next session unless requested):
+- Deep-link from `BillDetailScreen` straight into that bill's customer's `CustomerLedgerScreen` (skipped
+  in Session C as scope-creep beyond what was asked; cheap to add once there's a concrete need for it).
 
 ## ⚠️ Resume gotchas (carry-over + new)
+- **Udhar aging is FIFO across ALL of a customer's entries, not per-debit-linked to payments** (payments/
+  writeoffs aren't tied to a specific debit in this schema). `oldestUnsettledDebitDate()` in
+  `services/udhar/udharCalc.ts` nets a `void_reversal` against its *exact* originating debit by `bill_id`
+  **before** running FIFO — do NOT fold `void_reversal` into the generic reducing-amount pool. Doing so
+  lets a void-cancelled recent debit "absorb" the pool and launder an older *real* debt's age down to
+  `none`, which is a genuine correctness bug (caught during Plan review, regression-tested in
+  `udharCalc.test.ts`'s "nets a void_reversal against its own bill_id" case) — Void & Recreate is already
+  a first-class shipped flow, so this isn't hypothetical.
 - **ALWAYS `git push origin main` after committing — do NOT ask Banti** (see CLAUDE.md Workflow). EAS builds
   from GitHub, so an unpushed commit = stale cloud build (this already caused a repeat Kotlin build failure).
 - **Kotlin version is pinned to 2.1.20 via `plugins/withKotlinVersion.js`** (config plugin injecting

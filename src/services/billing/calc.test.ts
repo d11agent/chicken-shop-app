@@ -187,4 +187,17 @@ describe('udhar ledger (append-only)', () => {
     ];
     expect(udharBalance(entries)).toBe(0);
   });
+
+  it('signs a writeoff_reversal as positive (it cancels a writeoff)', () => {
+    expect(signedUdharAmount(UdharEntryType.writeoffReversal, 1000)).toBe(1000);
+  });
+
+  it('a writeoff_reversal restores the balance a writeoff had removed', () => {
+    const entries = [
+      { entryType: UdharEntryType.debit, amount: 4000 },
+      { entryType: UdharEntryType.writeoff, amount: 4000 },
+      { entryType: UdharEntryType.writeoffReversal, amount: 4000 },
+    ];
+    expect(udharBalance(entries)).toBe(4000);
+  });
 });
